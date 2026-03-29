@@ -1,0 +1,11 @@
+[Desktop Entry]
+Categories=Utility;TextEditor;
+Comment=General text editor
+Exec=nemac-texteditor %F
+Icon=nemac-editor
+Name=Nemac Text Editor
+GenericName=Nemac Text Editor
+StartupNotify=false
+Type=Application
+X-MultipleArgs=false
+MimeType=text/plain;text/x-makefile;text/x-c++hdr;text/x-c++src;text/x-csrc;text/css;application/x-shellscript;text/x-python;application/json;application/xml;image/svg+xml;

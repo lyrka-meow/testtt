@@ -1,0 +1,104 @@
+project(nemac-settings-daemon)
+set(TARGET nemac-settings-daemon)
+
+find_package(X11 REQUIRED)
+find_package(X11_XCB REQUIRED)
+find_package(XCB REQUIRED)
+
+pkg_check_modules(XORGLIBINPUT xorg-libinput IMPORTED_TARGET)
+pkg_check_modules(XORGSERVER xorg-server IMPORTED_TARGET)
+pkg_check_modules(SYNAPTICS xorg-synaptics IMPORTED_TARGET GLOBAL)
+
+file (GLOB_RECURSE SRCS
+  "*.cpp"
+  "*.h"
+  "theme/*.h"
+  "theme/*.cpp"
+  "brightness/*.h"
+  "brightness/*.cpp"
+  "brightness/*.c"
+  "battery/*.cpp"
+  "battery/*.h"
+  "language/*.cpp"
+  "language/*.h"
+  "dock/*.cpp"
+  "dock/*.h"
+  "mouse/*.h"
+  "mouse/*.cpp"
+  "touchpad/*.h"
+  "touchpad/*.cpp"
+  "touchpad/x11/*.h"
+  "touchpad/x11/*.cpp"
+)
+
+if(SYNAPTICS_FOUND)
+    add_definitions(-DHAVE_SYNAPTICS)
+else()
+    list(FILTER SRCS EXCLUDE REGEX "synapticstouchpad")
+endif()
+
+set(SOURCES ${SRCS})
+set(HEADERS "")
+set(FORMS "")
+set(RESOURCES "")
+
+qt5_add_dbus_adaptor(DBUS_SOURCES
+                     brightness/com.nemac.Brightness.xml
+                     brightness/brightnessmanager.h BrightnessManager)
+qt5_add_dbus_adaptor(DBUS_SOURCES
+                     theme/com.nemac.Theme.xml
+                     theme/thememanager.h ThemeManager)
+qt5_add_dbus_adaptor(DBUS_SOURCES
+                     battery/com.nemac.PrimaryBattery.xml
+                     battery/battery.h Battery)
+qt5_add_dbus_adaptor(DBUS_SOURCES
+                     language/com.nemac.Language.xml
+                     language/language.h Language)
+qt5_add_dbus_adaptor(DBUS_SOURCES
+                     dock/com.nemac.Dock.xml
+                     dock/dock.h Dock)
+qt5_add_dbus_adaptor(DBUS_SOURCES
+                     mouse/com.nemac.Mouse.xml
+                     mouse/mousemanager.h Mouse)
+qt5_add_dbus_adaptor(DBUS_SOURCES
+                     touchpad/com.nemac.Touchpad.xml
+                     touchpad/touchpadmanager.h TouchpadManager)
+set_source_files_properties(${DBUS_SOURCES} PROPERTIES SKIP_AUTOGEN ON)
+
+add_executable(${TARGET} ${SOURCES} ${DBUS_SOURCES} ${HEADERS} ${FORMS} ${RESOURCES})
+
+set(SETTINGS_DAEMON_LIBS
+    Qt5::Core
+    Qt5::Gui
+    Qt5::Widgets
+    Qt5::DBus
+    Qt5::X11Extras
+    Qt5::Xml
+    ${X11_LIBRARIES}
+    X11::X11
+    X11::Xi
+    X11::XCB
+    ${XCB_LIBRARIES}
+)
+
+if(XORGLIBINPUT_FOUND)
+    list(APPEND SETTINGS_DAEMON_LIBS PkgConfig::XORGLIBINPUT)
+endif()
+if(XORGSERVER_FOUND)
+    list(APPEND SETTINGS_DAEMON_LIBS PkgConfig::XORGSERVER)
+endif()
+if(SYNAPTICS_FOUND)
+    list(APPEND SETTINGS_DAEMON_LIBS PkgConfig::SYNAPTICS)
+endif()
+
+target_link_libraries(${TARGET} ${SETTINGS_DAEMON_LIBS})
+
+file(GLOB TS_FILES ${CMAKE_CURRENT_SOURCE_DIR}/translations/*.ts)
+if(TS_FILES)
+    qt5_add_translation(QM_FILES ${TS_FILES})
+    add_custom_target(translations DEPENDS ${QM_FILES} SOURCES ${TS_FILES})
+    add_dependencies(${TARGET} translations)
+    install(FILES ${QM_FILES} DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${TARGET}/translations)
+endif()
+
+install(TARGETS ${TARGET} DESTINATION ${CMAKE_INSTALL_BINDIR})

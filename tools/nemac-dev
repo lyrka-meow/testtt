@@ -1,0 +1,417 @@
+#!/bin/bash
+set -e
+
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+CYAN='\033[0;36m'
+BOLD='\033[1m'
+NC='\033[0m'
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [ -d "$SCRIPT_DIR/.git" ]; then
+    NEMAC_DIR="$SCRIPT_DIR"
+else
+    NEMAC_DIR="/opt/nemac-de"
+fi
+NEMAC_VERSION="3.6"
+NEMAC_REPO="lyrka-meow/nemac-de"
+LOG_DIR="${NEMAC_DIR}/logs"
+STAGING_DIR="${NEMAC_DIR}/.nemac-staging"
+RELEASES_DIR="${NEMAC_DIR}/releases"
+TARBALL_NAME="nemac-de-${NEMAC_VERSION}-x86_64.tar.gz"
+
+BUILD_ORDER=(
+    "libnemac"
+    "nemacui"
+    "core"
+    "kwin-plugins"
+    "qt-plugins"
+    "dock"
+    "statusbar"
+    "launcher"
+    "settings"
+    "filemanager"
+    "screenlocker"
+    "screenshot"
+    "terminal"
+    "texteditor"
+    "calculator"
+)
+
+BUILD_DEPS=(
+    git cmake make gcc
+    qt5-tools extra-cmake-modules
+    qt5-base qt5-declarative qt5-quickcontrols2 qt5-x11extras qt5-svg qt5-graphicaleffects
+    qt5-sensors
+    kwin kwin-x11 kdecoration
+    kwindowsystem5 kidletime5 kcoreaddons5
+    libkscreen5 kio5 solid5
+    polkit polkit-qt5
+    networkmanager-qt5
+    libqt5xdg libdbusmenu-qt5
+    libcanberra
+    libxcb xcb-util xcb-util-wm xcb-util-keysyms
+    libpulse
+    bluez bluez-qt5
+    freetype2 fontconfig
+    xorg-server-devel
+    syntax-highlighting5
+    libxcrypt icu
+)
+
+print_header() {
+    echo ""
+    echo -e "${CYAN}${BOLD}  Nemac DE — Developer Tools${NC}"
+    echo -e "${CYAN}  ═══════════════════════════${NC}"
+    echo ""
+}
+
+# ─── BUILD ───
+
+cmd_build() {
+    print_header
+    echo -e "${BLUE}[build]${NC} Устанавливаю зависимости для сборки..."
+
+    mkdir -p "$LOG_DIR" "$RELEASES_DIR"
+    sudo pacman -S --needed --noconfirm "${BUILD_DEPS[@]}" > "$LOG_DIR/nemac-deps.log" 2>&1
+    echo -e "${GREEN}  ✓${NC} Зависимости установлены"
+
+    if [ ! -d "$NEMAC_DIR/.git" ]; then
+        echo -e "${RED}  Репозиторий не найден: $NEMAC_DIR${NC}"
+        echo -e "  ${YELLOW}Склонируйте: git clone https://github.com/$NEMAC_REPO $NEMAC_DIR${NC}"
+        exit 1
+    fi
+
+    echo -e "${BLUE}[build]${NC} Собираю компоненты..."
+
+    local total=${#BUILD_ORDER[@]}
+    local current=0
+    local failed=()
+
+    for component in "${BUILD_ORDER[@]}"; do
+        current=$((current + 1))
+        local src_dir="$NEMAC_DIR/$component"
+
+        if [ ! -d "$src_dir" ]; then
+            continue
+        fi
+
+        echo -ne "  [$current/$total] $component...\r"
+        local build_dir="$src_dir/build"
+        rm -rf "$build_dir"
+
+        if cmake -Wno-dev -DCMAKE_WARN_DEPRECATED=OFF -DCMAKE_INSTALL_PREFIX:PATH=/usr -S "$src_dir" -B "$build_dir" > "$LOG_DIR/nemac-cmake-$component.log" 2>&1; then
+            if cmake --build "$build_dir" --parallel "$(nproc)" > "$LOG_DIR/nemac-build-$component.log" 2>&1; then
+                sudo cmake --install "$build_dir" --prefix /usr > /dev/null 2>&1
+                echo -e "  ${GREEN}✓${NC} [$current/$total] $component"
+            else
+                failed+=("$component")
+                echo -e "  ${RED}✗${NC} [$current/$total] $component (cmake --build failed)"
+            fi
+        else
+            failed+=("$component")
+            echo -e "  ${RED}✗${NC} [$current/$total] $component (cmake failed)"
+        fi
+    done
+
+    echo ""
+    if [ ${#failed[@]} -gt 0 ]; then
+        echo -e "${RED}  Ошибки: ${failed[*]}${NC}"
+        echo -e "  ${YELLOW}Логи: $LOG_DIR/nemac-cmake-*.log, nemac-build-*.log${NC}"
+    else
+        echo -e "${GREEN}  Все компоненты собраны и установлены.${NC}"
+    fi
+}
+
+# ─── PACKAGE ───
+
+cmd_package() {
+    print_header
+    echo -e "${BLUE}[package]${NC} Собираю бинарный пакет..."
+
+    if [ ! -d "$NEMAC_DIR/.git" ]; then
+        echo -e "${RED}  Репозиторий не найден: $NEMAC_DIR${NC}"
+        exit 1
+    fi
+
+    mkdir -p "$LOG_DIR" "$RELEASES_DIR"
+    rm -rf "$STAGING_DIR"
+    mkdir -p "$STAGING_DIR"
+
+    local total=${#BUILD_ORDER[@]}
+    local current=0
+    local failed=()
+
+    for component in "${BUILD_ORDER[@]}"; do
+        current=$((current + 1))
+        local src_dir="$NEMAC_DIR/$component"
+
+        if [ ! -d "$src_dir" ]; then
+            continue
+        fi
+
+        local build_dir="$src_dir/build"
+
+        if [ ! -f "$build_dir/CMakeCache.txt" ]; then
+            echo -e "  ${YELLOW}!${NC} $component — нет build, конфигурирую..."
+            if ! cmake -Wno-dev -DCMAKE_WARN_DEPRECATED=OFF -DCMAKE_INSTALL_PREFIX:PATH=/usr -S "$src_dir" -B "$build_dir" > "$LOG_DIR/nemac-cmake-$component.log" 2>&1; then
+                failed+=("$component")
+                echo -e "  ${RED}✗${NC} $component (cmake failed)"
+                continue
+            fi
+        fi
+
+        if ! cmake --build "$build_dir" --parallel "$(nproc)" > "$LOG_DIR/nemac-build-$component.log" 2>&1; then
+            failed+=("$component")
+            echo -e "  ${RED}✗${NC} $component (cmake --build failed)"
+            echo -e "       ${YELLOW}лог: $LOG_DIR/nemac-build-$component.log${NC}"
+            continue
+        fi
+
+        if ! env DESTDIR="$STAGING_DIR" cmake --install "$build_dir" --prefix /usr > "$LOG_DIR/nemac-destdir-install-$component.log" 2>&1; then
+            failed+=("$component")
+            echo -e "  ${RED}✗${NC} $component (cmake --install DESTDIR=... failed)"
+            echo -e "       ${YELLOW}лог: $LOG_DIR/nemac-destdir-install-$component.log${NC}"
+            continue
+        fi
+        echo -e "  ${GREEN}✓${NC} [$current/$total] $component"
+    done
+
+    echo -e "${BLUE}[package]${NC} Добавляю ассеты..."
+
+    # Wallpapers
+    if [ -d "$NEMAC_DIR/wallpapers/sources" ]; then
+        mkdir -p "$STAGING_DIR/usr/share/backgrounds/nemacde"
+        cp -f "$NEMAC_DIR/wallpapers/sources"/*.jpg "$STAGING_DIR/usr/share/backgrounds/nemacde/" 2>/dev/null || true
+    fi
+
+    # Icons
+    if [ -d "$NEMAC_DIR/icons/Crule" ]; then
+        mkdir -p "$STAGING_DIR/usr/share/icons"
+        cp -rf "$NEMAC_DIR/icons/Crule" "$STAGING_DIR/usr/share/icons/"
+        cp -rf "$NEMAC_DIR/icons/Crule-dark" "$STAGING_DIR/usr/share/icons/" 2>/dev/null || true
+    fi
+
+    # Cursor themes
+    if [ -d "$NEMAC_DIR/cursor-themes/nemac-light" ]; then
+        mkdir -p "$STAGING_DIR/usr/share/icons"
+        cp -rf "$NEMAC_DIR/cursor-themes/nemac-light" "$STAGING_DIR/usr/share/icons/"
+        cp -rf "$NEMAC_DIR/cursor-themes/nemac-dark" "$STAGING_DIR/usr/share/icons/" 2>/dev/null || true
+    fi
+
+    # GTK themes
+    if [ -d "$NEMAC_DIR/gtk-themes/Nemac" ]; then
+        mkdir -p "$STAGING_DIR/usr/share/themes"
+        cp -rf "$NEMAC_DIR/gtk-themes/Nemac" "$STAGING_DIR/usr/share/themes/"
+        cp -rf "$NEMAC_DIR/gtk-themes/Nemac-light" "$STAGING_DIR/usr/share/themes/" 2>/dev/null || true
+        cp -rf "$NEMAC_DIR/gtk-themes/Nemac-dark" "$STAGING_DIR/usr/share/themes/" 2>/dev/null || true
+    fi
+
+    # Management scripts
+    mkdir -p "$STAGING_DIR/usr/local/bin"
+    cp "$NEMAC_DIR/nemac" "$STAGING_DIR/usr/local/bin/nemac"
+    chmod +x "$STAGING_DIR/usr/local/bin/nemac"
+    cp "$NEMAC_DIR/nemac-dev" "$STAGING_DIR/usr/local/bin/nemac-dev"
+    chmod +x "$STAGING_DIR/usr/local/bin/nemac-dev"
+
+    # Updator script
+    if [ -f "$NEMAC_DIR/nemac-updator" ]; then
+        mkdir -p "$STAGING_DIR/usr/bin"
+        cp "$NEMAC_DIR/nemac-updator" "$STAGING_DIR/usr/bin/nemac-updator"
+        chmod +x "$STAGING_DIR/usr/bin/nemac-updator"
+    fi
+
+    mkdir -p "$STAGING_DIR/opt/nemac-de"
+    cp "$NEMAC_DIR/scripts/nm-diagnose" "$STAGING_DIR/opt/nemac-de/nemac-diagnose.sh"
+    chmod +x "$STAGING_DIR/opt/nemac-de/nemac-diagnose.sh"
+
+    # Config files
+    mkdir -p "$STAGING_DIR/etc"
+    cat > "$STAGING_DIR/etc/nemac" << CONF
+[General]
+Version=$NEMAC_VERSION
+CONF
+    cat > "$STAGING_DIR/etc/nemacde" << CONF
+[General]
+NemacDE=true
+CONF
+
+    # Remove cutefish leftovers
+    rm -f "$STAGING_DIR/usr/share/applications/cutefish-"*.desktop 2>/dev/null
+
+    echo -e "${BLUE}[package]${NC} Создаю архив..."
+
+    local output="$RELEASES_DIR/$TARBALL_NAME"
+    cd "$STAGING_DIR"
+    tar czf "$output" .
+    local size
+    size=$(du -h "$output" | cut -f1)
+
+    rm -rf "$STAGING_DIR"
+
+    echo ""
+    if [ ${#failed[@]} -gt 0 ]; then
+        echo -e "${YELLOW}  Внимание: не собрались: ${failed[*]}${NC}"
+    fi
+    echo -e "${GREEN}  Пакет создан: $output ($size)${NC}"
+    echo ""
+}
+
+# ─── PUBLISH ───
+
+cmd_publish() {
+    print_header
+
+    if ! command -v gh &>/dev/null; then
+        echo -e "${RED}  GitHub CLI (gh) не установлен.${NC}"
+        echo -e "  ${YELLOW}Установить: sudo pacman -S github-cli${NC}"
+        echo -e "  ${YELLOW}Авторизоваться: gh auth login${NC}"
+        exit 1
+    fi
+
+    if ! gh auth status &>/dev/null; then
+        echo -e "${RED}  GitHub CLI не авторизован.${NC}"
+        echo -e "  ${YELLOW}Выполните: gh auth login${NC}"
+        exit 1
+    fi
+
+    local tarball="$RELEASES_DIR/$TARBALL_NAME"
+    if [ ! -f "$tarball" ]; then
+        echo -e "${RED}  Пакет не найден: $tarball${NC}"
+        echo -e "  ${YELLOW}Сначала выполните: nemac-dev package${NC}"
+        exit 1
+    fi
+
+    local tag="v$NEMAC_VERSION"
+    local title="Nemac DE $tag"
+    local size
+    size=$(du -h "$tarball" | cut -f1)
+
+    echo -e "${BLUE}[publish]${NC} Публикую в GitHub Releases..."
+    echo -e "  Репозиторий: $NEMAC_REPO"
+    echo -e "  Тэг: $tag"
+    echo -e "  Файл: $TARBALL_NAME ($size)"
+    echo ""
+    read -rp "  Продолжить? (y/N): " confirm
+    if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
+        echo -e "  ${YELLOW}Отменено.${NC}"
+        exit 0
+    fi
+
+    if gh release view "$tag" --repo "$NEMAC_REPO" &>/dev/null; then
+        echo -e "  ${YELLOW}Релиз $tag уже существует, обновляю файл...${NC}"
+        gh release upload "$tag" "$tarball" --repo "$NEMAC_REPO" --clobber
+    else
+        gh release create "$tag" "$tarball" \
+            --repo "$NEMAC_REPO" \
+            --title "$title" \
+            --notes "Nemac DE $tag — ready-to-install binary package for Arch Linux (x86_64)."
+    fi
+
+    echo ""
+    echo -e "${GREEN}  Опубликовано: https://github.com/$NEMAC_REPO/releases/tag/$tag${NC}"
+    echo ""
+}
+
+# ─── TRANSFER ───
+
+cmd_transfer() {
+    print_header
+    echo -e "${BLUE}[transfer]${NC} Пакую инструменты для переноса..."
+
+    local TRANSFER_DIR="$HOME/nemac-transfer"
+    rm -rf "$TRANSFER_DIR"
+    mkdir -p "$TRANSFER_DIR"
+
+    # forge
+    local TOOLS_SRC="$HOME/.local/share/forge"
+    if [ -d "$TOOLS_SRC" ]; then
+        cp -rf "$TOOLS_SRC" "$TRANSFER_DIR/forge"
+        chmod +x "$TRANSFER_DIR/forge/"fg-* "$TRANSFER_DIR/forge/install.sh" 2>/dev/null || true
+        echo -e "  ${GREEN}✓${NC} forge"
+    else
+        echo -e "  ${YELLOW}!${NC} forge не найден: $TOOLS_SRC"
+    fi
+
+    # project_analyzer (pa)
+    local PA_SRC="$HOME/project_analyzer"
+    if [ -d "$PA_SRC" ]; then
+        mkdir -p "$TRANSFER_DIR/project_analyzer"
+        cp -f "$PA_SRC/project_analyzer" "$TRANSFER_DIR/project_analyzer/"
+        chmod +x "$TRANSFER_DIR/project_analyzer/project_analyzer"
+
+        cat > "$TRANSFER_DIR/project_analyzer/install.sh" << 'INSTALL'
+#!/bin/bash
+set -e
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+mkdir -p "$HOME/.local/bin"
+cp -f "$SCRIPT_DIR/project_analyzer" "$HOME/.local/bin/project_analyzer"
+chmod +x "$HOME/.local/bin/project_analyzer"
+if ! grep -q 'HOME/.local/bin' "$HOME/.bashrc" 2>/dev/null; then
+    echo 'export PATH="$PATH:$HOME/.local/bin"' >> "$HOME/.bashrc"
+fi
+echo "✓ project_analyzer установлен в ~/.local/bin/"
+echo "  Выполни: source ~/.bashrc"
+INSTALL
+        chmod +x "$TRANSFER_DIR/project_analyzer/install.sh"
+        echo -e "  ${GREEN}✓${NC} project_analyzer"
+    else
+        echo -e "  ${YELLOW}!${NC} project_analyzer не найден: $PA_SRC"
+    fi
+
+    echo ""
+    echo -e "${GREEN}  Готово!${NC} Папка: ${BOLD}$TRANSFER_DIR${NC}"
+    echo -e "  Заархивируй и кидай в тг."
+    echo -e "  На новой системе: распакуй и запусти ${CYAN}bash install.sh${NC} в каждой папке."
+    echo ""
+}
+
+# ─── DIAGNOSE ───
+
+cmd_diagnose() {
+    local diag="${HOME}/.local/share/forge/fg-diagnose"
+    if [ -f "$diag" ]; then
+        bash "$diag"
+    else
+        echo -e "${RED}  fg-diagnose не найден: $diag${NC}"
+        exit 1
+    fi
+}
+
+# ─── MENU ───
+
+show_menu() {
+    while true; do
+        print_header
+        echo -e "  ${GREEN}1${NC})  Собрать из исходников"
+        echo -e "  ${CYAN}2${NC})  Собрать пакет (tarball)"
+        echo -e "  ${BLUE}3${NC})  Опубликовать в GitHub Releases"
+        echo -e "  ${YELLOW}4${NC})  Диагностика"
+        echo -e "  ${GREEN}5${NC})  Перенос (transfer → ~/nemac-transfer/)"
+        echo -e "  ${RED}0${NC})  Выход"
+        echo ""
+        read -rp "  > " choice
+
+        case $choice in
+            1) cmd_build; read -rp "  Нажмите Enter..."; ;;
+            2) cmd_package; read -rp "  Нажмите Enter..."; ;;
+            3) cmd_publish; read -rp "  Нажмите Enter..."; ;;
+            4) cmd_diagnose; read -rp "  Нажмите Enter..."; ;;
+            5) cmd_transfer; read -rp "  Нажмите Enter..."; ;;
+            0) exit 0 ;;
+        esac
+    done
+}
+
+# ─── ENTRY POINT ───
+
+case "${1:-}" in
+    build)      cmd_build ;;
+    package|pkg) cmd_package ;;
+    publish|pub) cmd_publish ;;
+    diagnose|diag|--diagnose) cmd_diagnose ;;
+    transfer)   cmd_transfer ;;
+    *)          show_menu ;;
+esac

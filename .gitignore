@@ -1,0 +1,12 @@
+.phantom-forge.json
+
+# Build and logs
+**/build/
+logs/
+releases/
+.nemac-staging/
+report_*.txt
+
+# System
+.DS_Store
+Thumbs.db
