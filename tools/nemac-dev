@@ -16,7 +16,7 @@ else
     NEMAC_DIR="/opt/nemac-de"
 fi
 NEMAC_VERSION="3.6"
-NEMAC_REPO="lyrka-meow/nemac-de"
+NEMAC_REPO="lyrka-meow/testtt"
 LOG_DIR="${NEMAC_DIR}/logs"
 STAGING_DIR="${NEMAC_DIR}/.nemac-staging"
 RELEASES_DIR="${NEMAC_DIR}/releases"

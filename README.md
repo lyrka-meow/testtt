@@ -5,7 +5,7 @@
 ## Установка
 
 ```bash
-sudo bash -c "$(curl -fsSL https://raw.githubusercontent.com/lyrka-meow/nemac-de/main/installer.sh)"
+sudo bash -c "$(curl -fsSL https://raw.githubusercontent.com/lyrka-meow/testtt/main/tools/installer.sh)"
 ```
 
 ## Управление

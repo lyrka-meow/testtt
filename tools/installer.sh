@@ -9,7 +9,7 @@ CYAN='\033[0;36m'
 BOLD='\033[1m'
 NC='\033[0m'
 
-NEMAC_REPO="lyrka-meow/nemac-de"
+NEMAC_REPO="lyrka-meow/testtt"
 NEMAC_VERSION="3.6"
 GITHUB_API="https://api.github.com/repos/$NEMAC_REPO/releases/latest"
 NEMAC_BIN="/usr/local/bin/nemac"
