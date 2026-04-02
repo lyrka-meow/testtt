@@ -370,7 +370,7 @@ WRAPPER
         cp -f "$NEMAC_DIR/themes/wallpapers/sources"/*.jpg "$STAGING_DIR/usr/share/backgrounds/nemacde/" 2>/dev/null || true
     fi
 
-    # Icons (in themes/icons/) — skip @2x and dark variant to keep size down
+    # Icons (in themes/icons/) — skip @2x to keep size down
     if [ -d "$NEMAC_DIR/themes/icons/Crule" ]; then
         mkdir -p "$STAGING_DIR/usr/share/icons/Crule"
         rsync -a --exclude='*@2x*' "$NEMAC_DIR/themes/icons/Crule/" "$STAGING_DIR/usr/share/icons/Crule/" 2>/dev/null || \
@@ -379,6 +379,17 @@ WRAPPER
                 dst="$STAGING_DIR/usr/share/icons/Crule/$rel"
                 [ -d "$f" ] && mkdir -p "$dst" || cp "$f" "$dst" 2>/dev/null
             done
+        # Strip @2x entries from index.theme so it matches actual directories
+        python3 -c "
+import re, sys
+with open('$STAGING_DIR/usr/share/icons/Crule/index.theme') as f: c=f.read()
+def rm2x(m):
+    dirs=[d for d in m.group(1).split(',') if '@2x' not in d]
+    return 'Directories='+','.join(dirs)
+c=re.sub(r'Directories=([^\n]+)',rm2x,c)
+c=re.sub(r'\[[^\]]*@2x[^\]]*\][^\[]*','',c)
+with open('$STAGING_DIR/usr/share/icons/Crule/index.theme','w') as f: f.write(c)
+" 2>/dev/null || true
     fi
 
     # Cursor themes (in themes/cursor-themes/)

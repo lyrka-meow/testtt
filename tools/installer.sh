@@ -268,6 +268,9 @@ download_and_install() {
         [ -f "$f" ] && chmod 755 "$f"
     done
 
+    # Rebuild icon cache
+    [ -d /usr/share/icons/Crule ] && gtk-update-icon-cache -f -t /usr/share/icons/Crule/ 2>/dev/null || true
+
     rm -f "$tmpfile"
     echo -e "  ${GREEN}[3/5]${NC} Nemac DE $remote_tag установлен  ${GREEN}✓${NC}"
 }
