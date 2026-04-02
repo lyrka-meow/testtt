@@ -140,24 +140,11 @@ install_dependencies() {
     local kwin_ver
     kwin_ver=$(detect_kwin_version)
 
+    # Nemac DE bundles KWin 5.27 in /opt/nemac-de/kwin — always use KF5 deps regardless of system KWin
     if [ "$kwin_ver" = "6" ]; then
-        echo ""
-        echo -e "  ${RED}${BOLD}Обнаружен KWin 6.${NC}"
-        echo -e "  ${RED}Nemac DE разработан для KWin 5 (Qt5). KWin 5 больше нет в репозиториях.${NC}"
-        echo ""
-        echo -e "  ${YELLOW}Что будет работать:${NC} session, statusbar, dock, приложения"
-        echo -e "  ${RED}Что НЕ будет работать:${NC} оконные эффекты (scale, squash, popups), rounded corners, декорации"
-        echo ""
-        read -rp "  Установить без оконных эффектов? (y/N): " answer
-        if [[ "$answer" != "y" && "$answer" != "Y" && "$answer" != "д" && "$answer" != "Д" ]]; then
-            echo -e "  ${YELLOW}Установка отменена.${NC}"
-            exit 0
-        fi
-        warn "Установка на KWin 6 без оконных эффектов"
-        deps+=("${KWIN6_DEPS[@]}")
-    else
-        deps+=("${KWIN5_DEPS[@]}")
+        echo -e "  ${YELLOW}  Обнаружен KWin 6 — используем встроенный KWin 5.27 (/opt/nemac-de/kwin)${NC}"
     fi
+    deps+=("${KWIN5_DEPS[@]}")
 
     if ! pacman -Qi xorg-server &>/dev/null; then
         deps+=(xorg-server)
