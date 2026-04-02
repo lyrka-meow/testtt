@@ -30,11 +30,13 @@ import NemacUI 1.0 as NemacUI
 Item {
     id: root
 
-    property real horizontalSpacing: launcher.screenRect.width * 0.01
-    property real verticalSpacing: launcher.screenRect.height * 0.01
-    property real maxSpacing: horizontalSpacing > verticalSpacing ? horizontalSpacing : verticalSpacing
     property bool showed: launcher.showed
-    property int iconSize: root.height < 960 ? 96 : 128
+    property int iconSize: 52
+
+    readonly property int popupW: Math.min(460, root.width - 32)
+    readonly property int popupH: Math.min(540, root.height - launcher.bottomMargin - 80)
+    readonly property int popupX: (root.width - popupW) / 2
+    readonly property int popupY: root.height - launcher.bottomMargin - popupH - 14
 
     property alias uninstallDialog: _uninstallDialog
 
@@ -103,43 +105,28 @@ Item {
         id: backend
     }
 
-    Rectangle {
-        anchors.fill: parent
-        color: backend.color
-        visible: backend.type === 1
-    }
-
+    // Wallpaper source — invisible, only used for blur sampling
     Image {
         id: wallpaperImage
         anchors.fill: parent
         source: "file://" + backend.path
-        sourceSize: Qt.size(launcher.screenRect.width,
-                            launcher.screenRect.height)
+        sourceSize: Qt.size(launcher.screenRect.width, launcher.screenRect.height)
         fillMode: Image.PreserveAspectCrop
         asynchronous: false
         cache: false
         smooth: true
-        visible: backend.type === 0
-
+        visible: false
         onSourceChanged: launcher.clearPixmapCache()
     }
 
+    // Pre-blurred wallpaper (invisible, sampled by popup)
     FastBlur {
         id: wallpaperBlur
         anchors.fill: parent
-        radius: 72
+        radius: 80
         source: wallpaperImage
-        cached: false
-        visible: wallpaperImage.visible
-    }
-
-    ColorOverlay {
-        id: wallpaperColor
-        anchors.fill: parent
-        source: parent
-        color: "#000000"
-        opacity: backend.dimsWallpaper ? 0.5 : 0.4
-        visible: true
+        cached: true
+        visible: false
     }
 
     LauncherModel {
@@ -148,184 +135,198 @@ Item {
 
     Connections {
         target: launcherModel
-
         function onApplicationLaunched() {
             launcher.hideWindow()
         }
     }
 
-    ColumnLayout {
-        id: mainLayout
+    // Dim overlay — click outside to close
+    Rectangle {
         anchors.fill: parent
-        anchors.topMargin: 28
-        anchors.leftMargin: launcher.leftMargin
-        anchors.rightMargin: launcher.rightMargin
-        anchors.bottomMargin: launcher.bottomMargin + 28
-        spacing: 0
-
-        Item {
-            id: searchItem
-            Layout.fillWidth: true
-            height: fontMetrics.height + NemacUI.Units.largeSpacing
-
-            TextMetrics {
-                id: fontMetrics
-                text: _placeLabel.text
-            }
-
-            TextField {
-                id: textField
-                anchors.centerIn: parent
-                width: searchItem.width * 0.2
-                height: parent.height
-
-                leftPadding: textField.activeFocus ? _placeImage.width + NemacUI.Units.largeSpacing : NemacUI.Units.largeSpacing
-                rightPadding: NemacUI.Units.largeSpacing
-
-                selectByMouse: true
-
-                // placeholderText: qsTr("Search")
-                wrapMode: Text.NoWrap
-
-                color: "white"
-
-                Item {
-                    id: placeHolderItem
-                    height: textField.height
-                    width: _placeHolderLayout.implicitWidth
-                    opacity: 0.6
-                    x: textField.activeFocus ? NemacUI.Units.smallSpacing : (textField.width - placeHolderItem.width) / 2
-                    y: 0
-
-                    Behavior on x {
-                        NumberAnimation {
-                            duration: 200
-                        }
-                    }
-
-                    RowLayout {
-                        id: _placeHolderLayout
-                        anchors.fill: parent
-
-                        Image {
-                            id: _placeImage
-                            height: placeHolderItem.height - NemacUI.Units.largeSpacing
-                            width: height
-                            sourceSize: Qt.size(width, height)
-                            source: "qrc:/images/system-search-symbolic.svg"
-                        }
-
-                        Label {
-                            id: _placeLabel
-                            color: "white"
-                            text: qsTr("Search")
-                            visible: !textField.length && !textField.preeditText && (!textField.activeFocus || textField.horizontalAlignment !== Qt.AlignHCenter)
-                        }
-                    }
-                }
-
-                background: Rectangle {
-                    opacity: 0.2
-                    radius: textField.height * 0.2
-                    color: "white"
-                    border.width: 0
-                }
-
-                Timer {
-                    id: searchTimer
-                    interval: 500
-                    repeat: false
-                    onTriggered: launcherModel.search(textField.text)
-                }
-
-                onTextChanged: {
-                    if (textField.text === "") {
-                        // Switch directly to normal mode
-                        launcherModel.search("")
-                    } else {
-                        searchTimer.start()
-                    }
-                }
-                Keys.onEscapePressed: launcher.hideWindow()
-            }
-        }
-
-        Item {
-            height: 14
-        }
-
-        Item {
-            id: gridItem
-            Layout.fillHeight: true
-            Layout.fillWidth: true
-
-            Keys.enabled: true
-            Keys.forwardTo: appView
-
-            AllAppsView {
-                id: appView
-                anchors.fill: parent
-                anchors.leftMargin: gridItem.width * 0.1
-                anchors.rightMargin: gridItem.width * 0.1
-                Layout.alignment: Qt.AlignHCenter
-                searchMode: textField.text
-                focus: true
-
-                Keys.enabled: true
-                Keys.onPressed: {
-                    if (event.key === Qt.Key_Escape)
-                        launcher.hideWindow()
-
-                    if (event.key === Qt.Key_Left ||
-                            event.key === Qt.Key_Right ||
-                            event.key === Qt.Key_Up ||
-                            event.key === Qt.Key_Down) {
-                        return
-                    }
-
-                    // First input text
-                    if ((event.key >= Qt.Key_A && event.key <= Qt.Key_Z) ||
-                            event.key >= Qt.Key_0 && event.key <= Qt.Key_9) {
-                        textField.forceActiveFocus()
-                        textField.text = event.text
-                    }
-                }
-
-                Label {
-                    anchors.centerIn: parent
-                    text: qsTr("Not found")
-                    font.pointSize: 30
-                    color: "white"
-                    visible: appView.count === 0
-                }
-            }
-        }
-
-        PageIndicator {
-            id: pageIndicator
-            count: appView.count
-            currentIndex: appView.currentIndex
-            onCurrentIndexChanged: appView.currentIndex = currentIndex
-            interactive: true
-            spacing: NemacUI.Units.largeSpacing
-            Layout.alignment: Qt.AlignHCenter
-            visible: appView.count > 1
-
-            delegate: Rectangle {
-                width: 10
-                height: width
-                radius: width / 2
-                color: index === pageIndicator.currentIndex ? "white" : Qt.darker("white", 1.8)
-            }
-        }
+        color: "#000000"
+        opacity: showed ? 0.30 : 0
+        Behavior on opacity { NumberAnimation { duration: 220 } }
     }
 
     MouseArea {
         anchors.fill: parent
         z: -1
+        onClicked: launcher.hideWindow()
+    }
 
-        onClicked: {
-            launcher.hideWindow()
+    // ── POPUP PANEL ─────────────────────────────────────────────────
+    Item {
+        id: popupRoot
+        x: popupX
+        y: popupY
+        width: popupW
+        height: popupH
+
+        opacity: showed ? 1.0 : 0.0
+        scale:   showed ? 1.0 : 0.90
+        transformOrigin: Item.Bottom
+
+        Behavior on opacity { NumberAnimation { duration: 200; easing.type: Easing.OutQuad } }
+        Behavior on scale   { NumberAnimation { duration: 220; easing.type: Easing.OutBack; overshoot: 0.3 } }
+
+        // Blurred wallpaper slice (clipped to popup)
+        ShaderEffectSource {
+            id: blurSlice
+            anchors.fill: parent
+            sourceItem: wallpaperBlur
+            sourceRect: Qt.rect(popupX, popupY, popupW, popupH)
+            visible: backend.type === 0 && wallpaperImage.status === Image.Ready
+        }
+
+        // Glass dark tint
+        Rectangle {
+            anchors.fill: parent
+            radius: 20
+            color: backend.type === 0
+                   ? Qt.rgba(0.05, 0.05, 0.12, 0.72)
+                   : Qt.rgba(0.08, 0.08, 0.14, 0.96)
+            border.color: Qt.rgba(1, 1, 1, 0.09)
+            border.width: 1
+        }
+
+        // Top highlight line
+        Rectangle {
+            x: 20; y: 0
+            width: parent.width - 40
+            height: 1
+            color: Qt.rgba(1, 1, 1, 0.18)
+        }
+
+        // Drop shadow layer
+        layer.enabled: true
+        layer.effect: DropShadow {
+            horizontalOffset: 0
+            verticalOffset: 10
+            radius: 30
+            samples: 30
+            color: Qt.rgba(0, 0, 0, 0.55)
+        }
+
+        ColumnLayout {
+            anchors.fill: parent
+            anchors.margins: 14
+            spacing: 10
+
+            // Search bar
+            TextField {
+                id: textField
+                Layout.fillWidth: true
+                height: 36
+                leftPadding: _searchIcon.width + 14
+                rightPadding: 10
+                selectByMouse: true
+                color: "white"
+                font.pixelSize: 13
+
+                Item {
+                    id: placeHolderItem
+                    height: parent.height
+                    width: _phRow.implicitWidth
+                    opacity: 0.5
+                    x: textField.activeFocus ? 8 : (parent.width - width) / 2
+                    y: 0
+                    Behavior on x { NumberAnimation { duration: 180 } }
+
+                    RowLayout {
+                        id: _phRow
+                        anchors.fill: parent
+                        spacing: 6
+                        Image {
+                            id: _searchIcon
+                            height: 16; width: 16
+                            sourceSize: Qt.size(16, 16)
+                            source: "qrc:/images/system-search-symbolic.svg"
+                        }
+                        Label {
+                            color: "white"
+                            font.pixelSize: 13
+                            text: qsTr("Search")
+                            visible: !textField.length && !textField.preeditText
+                        }
+                    }
+                }
+
+                background: Rectangle {
+                    radius: 9
+                    color: Qt.rgba(1, 1, 1, 0.11)
+                    border.color: Qt.rgba(1, 1, 1, 0.07)
+                    border.width: 1
+                }
+
+                Timer {
+                    id: searchTimer
+                    interval: 300
+                    repeat: false
+                    onTriggered: launcherModel.search(textField.text)
+                }
+
+                onTextChanged: {
+                    if (text === "") launcherModel.search("")
+                    else searchTimer.start()
+                }
+                Keys.onEscapePressed: launcher.hideWindow()
+            }
+
+            // App grid
+            Item {
+                id: gridItem
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+
+                Keys.enabled: true
+                Keys.forwardTo: appView
+
+                AllAppsView {
+                    id: appView
+                    anchors.fill: parent
+                    searchMode: textField.text
+                    focus: true
+
+                    Keys.enabled: true
+                    Keys.onPressed: {
+                        if (event.key === Qt.Key_Escape)
+                            launcher.hideWindow()
+                        if ((event.key >= Qt.Key_A && event.key <= Qt.Key_Z) ||
+                                event.key >= Qt.Key_0 && event.key <= Qt.Key_9) {
+                            textField.forceActiveFocus()
+                            textField.text = event.text
+                        }
+                    }
+
+                    Label {
+                        anchors.centerIn: parent
+                        text: qsTr("Not found")
+                        font.pixelSize: 15
+                        color: Qt.rgba(1, 1, 1, 0.45)
+                        visible: appView.count === 0
+                    }
+                }
+            }
+
+            // Page dots
+            PageIndicator {
+                id: pageIndicator
+                count: appView.count
+                currentIndex: appView.currentIndex
+                onCurrentIndexChanged: appView.currentIndex = currentIndex
+                interactive: true
+                spacing: 7
+                Layout.alignment: Qt.AlignHCenter
+                visible: appView.count > 1
+
+                delegate: Rectangle {
+                    width: 6; height: 6
+                    radius: 3
+                    color: index === pageIndicator.currentIndex
+                           ? "white" : Qt.rgba(1, 1, 1, 0.28)
+                    Behavior on color { ColorAnimation { duration: 150 } }
+                }
+            }
         }
     }
 
