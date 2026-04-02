@@ -105,30 +105,6 @@ Item {
         id: backend
     }
 
-    // Wallpaper source — invisible, only used for blur sampling
-    Image {
-        id: wallpaperImage
-        anchors.fill: parent
-        source: "file://" + backend.path
-        sourceSize: Qt.size(launcher.screenRect.width, launcher.screenRect.height)
-        fillMode: Image.PreserveAspectCrop
-        asynchronous: false
-        cache: false
-        smooth: true
-        visible: false
-        onSourceChanged: launcher.clearPixmapCache()
-    }
-
-    // Pre-blurred wallpaper (invisible, sampled by popup)
-    FastBlur {
-        id: wallpaperBlur
-        anchors.fill: parent
-        radius: 80
-        source: wallpaperImage
-        cached: true
-        visible: false
-    }
-
     LauncherModel {
         id: launcherModel
     }
@@ -167,24 +143,13 @@ Item {
         transformOrigin: Item.Bottom
 
         Behavior on opacity { NumberAnimation { duration: 200; easing.type: Easing.OutQuad } }
-        Behavior on scale   { NumberAnimation { duration: 220; easing.type: Easing.OutBack; overshoot: 0.3 } }
+        Behavior on scale   { NumberAnimation { duration: 220; easing.type: Easing.OutBack; easing.overshoot: 0.3 } }
 
-        // Blurred wallpaper slice (clipped to popup)
-        ShaderEffectSource {
-            id: blurSlice
-            anchors.fill: parent
-            sourceItem: wallpaperBlur
-            sourceRect: Qt.rect(popupX, popupY, popupW, popupH)
-            visible: backend.type === 0 && wallpaperImage.status === Image.Ready
-        }
-
-        // Glass dark tint
+        // Dark glass panel background
         Rectangle {
             anchors.fill: parent
             radius: 20
-            color: backend.type === 0
-                   ? Qt.rgba(0.05, 0.05, 0.12, 0.72)
-                   : Qt.rgba(0.08, 0.08, 0.14, 0.96)
+            color: Qt.rgba(0.07, 0.07, 0.13, 0.92)
             border.color: Qt.rgba(1, 1, 1, 0.09)
             border.width: 1
         }
@@ -195,16 +160,6 @@ Item {
             width: parent.width - 40
             height: 1
             color: Qt.rgba(1, 1, 1, 0.18)
-        }
-
-        // Drop shadow layer
-        layer.enabled: true
-        layer.effect: DropShadow {
-            horizontalOffset: 0
-            verticalOffset: 10
-            radius: 30
-            samples: 30
-            color: Qt.rgba(0, 0, 0, 0.55)
         }
 
         ColumnLayout {
