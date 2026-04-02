@@ -77,27 +77,106 @@ print_header() {
 }
 
 # ─── KWIN BUILD ───
+# KWin 5.27 needs libs missing from repos: kdecoration5, kscreenlocker5, kwayland-server5
+# We build them from invent.kde.org Plasma/5.27 branch into KWIN_PREFIX first
+
+KWIN_KDE_BASE="https://invent.kde.org/plasma"
+KWIN_SUBDEPS=(
+    "kdecoration"
+    "kscreenlocker"
+    "kwayland-server"
+    "plasma-framework:frameworks/plasma-framework"
+)
+
+build_kwin_dep() {
+    local name="$1"
+    local repo_path="$2"
+    local prefix="$3"
+    local logprefix="$4"
+
+    local url="${KWIN_KDE_BASE}/${repo_path}/-/archive/Plasma/${KWIN_VERSION}/${repo_path##*/}-Plasma-${KWIN_VERSION}.tar.gz"
+    local dir_name="${repo_path##*/}-Plasma-${KWIN_VERSION}"
+
+    echo -e "  ${BLUE}[kwin]${NC}   ↳ $name..."
+    if ! curl -fSL "$url" -o "/tmp/nemac-kwin-build/${name}.tar.gz" 2>>"$LOG_DIR/nemac-kwin-download.log"; then
+        echo -e "  ${RED}✗${NC}   $name (скачивание)"
+        return 1
+    fi
+
+    tar xzf "/tmp/nemac-kwin-build/${name}.tar.gz" -C "/tmp/nemac-kwin-build/"
+
+    if ! cmake -Wno-dev -DCMAKE_WARN_DEPRECATED=OFF \
+        -DCMAKE_INSTALL_PREFIX="$prefix" \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DBUILD_TESTING=OFF \
+        -DKDE_INSTALL_LIBDIR=lib \
+        -G Ninja \
+        -S "/tmp/nemac-kwin-build/$dir_name" \
+        -B "/tmp/nemac-kwin-build/build-${name}" \
+        > "$LOG_DIR/nemac-cmake-${logprefix}.log" 2>&1; then
+        echo -e "  ${RED}✗${NC}   $name (cmake)"
+        echo -e "       ${YELLOW}лог: $LOG_DIR/nemac-cmake-${logprefix}.log${NC}"
+        return 1
+    fi
+
+    if ! cmake --build "/tmp/nemac-kwin-build/build-${name}" --parallel "$(nproc)" \
+        > "$LOG_DIR/nemac-build-${logprefix}.log" 2>&1; then
+        echo -e "  ${RED}✗${NC}   $name (сборка)"
+        echo -e "       ${YELLOW}лог: $LOG_DIR/nemac-build-${logprefix}.log${NC}"
+        return 1
+    fi
+
+    sudo cmake --install "/tmp/nemac-kwin-build/build-${name}" > /dev/null 2>&1
+    echo -e "  ${GREEN}✓${NC}   $name"
+    return 0
+}
 
 build_kwin() {
     local mode="$1"  # "install" or "staging"
     local staging_dir="$2"
 
-    echo -e "  ${BLUE}[kwin]${NC} Скачиваю KWin ${KWIN_VERSION}..."
     local kwin_src="/tmp/nemac-kwin-build"
     rm -rf "$kwin_src"
     mkdir -p "$kwin_src"
 
-    if ! curl -fSL "$KWIN_URL" -o "$kwin_src/kwin.tar.gz" 2>>"$LOG_DIR/nemac-kwin-download.log"; then
-        echo -e "  ${RED}✗${NC} kwin (скачивание не удалось)"
+    # Point cmake to our custom-built libs
+    export CMAKE_PREFIX_PATH="$KWIN_PREFIX:${CMAKE_PREFIX_PATH:-}"
+    export PKG_CONFIG_PATH="$KWIN_PREFIX/lib/pkgconfig:${PKG_CONFIG_PATH:-}"
+
+    # 1. Build missing KDE libs
+    echo -e "  ${BLUE}[kwin]${NC} Собираю зависимости KWin..."
+    local dep_failed=0
+    for entry in "${KWIN_SUBDEPS[@]}"; do
+        local name="${entry%%:*}"
+        local repo_path="${entry#*:}"
+        # If no colon, repo_path == name (same repo name as package name)
+        [ "$repo_path" = "$name" ] && repo_path="$name"
+        if ! build_kwin_dep "$name" "$repo_path" "$KWIN_PREFIX" "kwin-dep-$name"; then
+            dep_failed=1
+            break
+        fi
+    done
+
+    if [ "$dep_failed" -eq 1 ]; then
+        rm -rf "$kwin_src"
         return 1
     fi
 
+    # 2. Download KWin source
+    echo -e "  ${BLUE}[kwin]${NC} Скачиваю KWin ${KWIN_VERSION}..."
+    if ! curl -fSL "$KWIN_URL" -o "$kwin_src/kwin.tar.gz" 2>>"$LOG_DIR/nemac-kwin-download.log"; then
+        echo -e "  ${RED}✗${NC} kwin (скачивание не удалось)"
+        rm -rf "$kwin_src"
+        return 1
+    fi
     tar xzf "$kwin_src/kwin.tar.gz" -C "$kwin_src"
     local src="$kwin_src/kwin-Plasma-${KWIN_VERSION}"
 
+    # 3. Build KWin
     echo -e "  ${BLUE}[kwin]${NC} Собираю KWin ${KWIN_VERSION}..."
     if ! cmake -Wno-dev -DCMAKE_WARN_DEPRECATED=OFF \
         -DCMAKE_INSTALL_PREFIX="$KWIN_PREFIX" \
+        -DCMAKE_PREFIX_PATH="$KWIN_PREFIX" \
         -DCMAKE_BUILD_TYPE=Release \
         -DBUILD_TESTING=OFF \
         -DKDE_INSTALL_LIBDIR=lib \
@@ -105,22 +184,24 @@ build_kwin() {
         -S "$src" -B "$kwin_src/build" > "$LOG_DIR/nemac-cmake-kwin.log" 2>&1; then
         echo -e "  ${RED}✗${NC} kwin (cmake failed)"
         echo -e "       ${YELLOW}лог: $LOG_DIR/nemac-cmake-kwin.log${NC}"
+        rm -rf "$kwin_src"
         return 1
     fi
 
     if ! cmake --build "$kwin_src/build" --parallel "$(nproc)" > "$LOG_DIR/nemac-build-kwin.log" 2>&1; then
         echo -e "  ${RED}✗${NC} kwin (сборка не удалась)"
         echo -e "       ${YELLOW}лог: $LOG_DIR/nemac-build-kwin.log${NC}"
+        rm -rf "$kwin_src"
         return 1
     fi
 
+    # 4. Install
     if [ "$mode" = "install" ]; then
         sudo cmake --install "$kwin_src/build" > /dev/null 2>&1
-        # Wrapper script
         sudo tee /usr/bin/nemac-kwin > /dev/null << 'WRAPPER'
 #!/bin/bash
-export QT_PLUGIN_PATH="/opt/nemac-de/kwin/lib/qt5/plugins:${QT_PLUGIN_PATH}"
-export QML2_IMPORT_PATH="/opt/nemac-de/kwin/lib/qt5/qml:${QML2_IMPORT_PATH}"
+export QT_PLUGIN_PATH="/opt/nemac-de/kwin/lib/qt5/plugins:/opt/nemac-de/kwin/lib/plugins:${QT_PLUGIN_PATH}"
+export QML2_IMPORT_PATH="/opt/nemac-de/kwin/lib/qt5/qml:/opt/nemac-de/kwin/lib/qml:${QML2_IMPORT_PATH}"
 export LD_LIBRARY_PATH="/opt/nemac-de/kwin/lib:${LD_LIBRARY_PATH}"
 export XDG_DATA_DIRS="/opt/nemac-de/kwin/share:${XDG_DATA_DIRS}"
 exec /opt/nemac-de/kwin/bin/kwin_x11 "$@"
@@ -128,11 +209,18 @@ WRAPPER
         sudo chmod 755 /usr/bin/nemac-kwin
     elif [ "$mode" = "staging" ]; then
         env DESTDIR="$staging_dir" cmake --install "$kwin_src/build" > "$LOG_DIR/nemac-destdir-install-kwin.log" 2>&1
+        # Also include the sub-deps in staging
+        for entry in "${KWIN_SUBDEPS[@]}"; do
+            local name="${entry%%:*}"
+            if [ -d "/tmp/nemac-kwin-build/build-${name}" ]; then
+                env DESTDIR="$staging_dir" cmake --install "/tmp/nemac-kwin-build/build-${name}" > /dev/null 2>&1
+            fi
+        done
         mkdir -p "$staging_dir/usr/bin"
         cat > "$staging_dir/usr/bin/nemac-kwin" << 'WRAPPER'
 #!/bin/bash
-export QT_PLUGIN_PATH="/opt/nemac-de/kwin/lib/qt5/plugins:${QT_PLUGIN_PATH}"
-export QML2_IMPORT_PATH="/opt/nemac-de/kwin/lib/qt5/qml:${QML2_IMPORT_PATH}"
+export QT_PLUGIN_PATH="/opt/nemac-de/kwin/lib/qt5/plugins:/opt/nemac-de/kwin/lib/plugins:${QT_PLUGIN_PATH}"
+export QML2_IMPORT_PATH="/opt/nemac-de/kwin/lib/qt5/qml:/opt/nemac-de/kwin/lib/qml:${QML2_IMPORT_PATH}"
 export LD_LIBRARY_PATH="/opt/nemac-de/kwin/lib:${LD_LIBRARY_PATH}"
 export XDG_DATA_DIRS="/opt/nemac-de/kwin/share:${XDG_DATA_DIRS}"
 exec /opt/nemac-de/kwin/bin/kwin_x11 "$@"
