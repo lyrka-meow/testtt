@@ -291,6 +291,11 @@ cmd_package() {
     rm -rf "$STAGING_DIR"
     mkdir -p "$STAGING_DIR"
 
+    # Fix permissions on build dirs left root-owned by cmd_build's sudo cmake --install
+    for c in "${BUILD_ORDER[@]}"; do
+        [ -d "$NEMAC_DIR/$c/build" ] && sudo chown -R "$USER:" "$NEMAC_DIR/$c/build" 2>/dev/null || true
+    done
+
     local total=${#BUILD_ORDER[@]}
     local current=0
     local failed=()
@@ -298,13 +303,25 @@ cmd_package() {
     for component in "${BUILD_ORDER[@]}"; do
         current=$((current + 1))
 
-        # KWin: download from kde.org and build separately
+        # KWin: copy from already-installed /opt/nemac-de/kwin to staging (skip full rebuild)
         if [ "$component" = "kwin" ]; then
-            echo -ne "  [$current/$total] kwin (KWin ${KWIN_VERSION})...\r"
-            if build_kwin "staging" "$STAGING_DIR"; then
-                echo -e "  ${GREEN}✓${NC} [$current/$total] kwin (KWin ${KWIN_VERSION})"
+            echo -ne "  [$current/$total] kwin...\r"
+            if [ -d "$KWIN_PREFIX/bin" ]; then
+                mkdir -p "$STAGING_DIR/$KWIN_PREFIX"
+                cp -a "$KWIN_PREFIX/." "$STAGING_DIR/$KWIN_PREFIX/"
+                mkdir -p "$STAGING_DIR/usr/bin"
+                cat > "$STAGING_DIR/usr/bin/nemac-kwin" << 'WRAPPER'
+#!/bin/bash
+export QT_PLUGIN_PATH="/opt/nemac-de/kwin/lib/qt5/plugins:/opt/nemac-de/kwin/lib/plugins:${QT_PLUGIN_PATH}"
+export QML2_IMPORT_PATH="/opt/nemac-de/kwin/lib/qt5/qml:/opt/nemac-de/kwin/lib/qml:${QML2_IMPORT_PATH}"
+export LD_LIBRARY_PATH="/opt/nemac-de/kwin/lib:${LD_LIBRARY_PATH}"
+export XDG_DATA_DIRS="/opt/nemac-de/kwin/share:${XDG_DATA_DIRS}"
+exec /opt/nemac-de/kwin/bin/kwin_x11 "$@"
+WRAPPER
+                chmod 755 "$STAGING_DIR/usr/bin/nemac-kwin"
+                echo -e "  ${GREEN}✓${NC} [$current/$total] kwin (скопирован из $KWIN_PREFIX)"
             else
-                failed+=("kwin")
+                echo -e "  ${YELLOW}!${NC} kwin не установлен, пропускаю (запусти nemac-dev build сначала)"
             fi
             continue
         fi
@@ -335,6 +352,7 @@ cmd_package() {
             continue
         fi
 
+        sudo chown -R "$USER:" "$build_dir" 2>/dev/null || true
         if ! env DESTDIR="$STAGING_DIR" cmake --install "$build_dir" --prefix /usr > "$LOG_DIR/nemac-destdir-install-${log_name}.log" 2>&1; then
             failed+=("$component")
             echo -e "  ${RED}✗${NC} $component (cmake --install DESTDIR=... failed)"
@@ -374,23 +392,23 @@ cmd_package() {
         cp -rf "$NEMAC_DIR/gtk-themes/Nemac-dark" "$STAGING_DIR/usr/share/themes/" 2>/dev/null || true
     fi
 
-    # Management scripts
+    # Management scripts (in tools/)
     mkdir -p "$STAGING_DIR/usr/local/bin"
-    cp "$NEMAC_DIR/nemac" "$STAGING_DIR/usr/local/bin/nemac"
-    chmod +x "$STAGING_DIR/usr/local/bin/nemac"
-    cp "$NEMAC_DIR/nemac-dev" "$STAGING_DIR/usr/local/bin/nemac-dev"
-    chmod +x "$STAGING_DIR/usr/local/bin/nemac-dev"
+    [ -f "$NEMAC_DIR/tools/nemac" ] && cp "$NEMAC_DIR/tools/nemac" "$STAGING_DIR/usr/local/bin/nemac" && chmod +x "$STAGING_DIR/usr/local/bin/nemac" || true
+    [ -f "$NEMAC_DIR/tools/nemac-dev" ] && cp "$NEMAC_DIR/tools/nemac-dev" "$STAGING_DIR/usr/local/bin/nemac-dev" && chmod +x "$STAGING_DIR/usr/local/bin/nemac-dev" || true
 
     # Updator script
-    if [ -f "$NEMAC_DIR/nemac-updator" ]; then
+    if [ -f "$NEMAC_DIR/tools/nemac-updator" ]; then
         mkdir -p "$STAGING_DIR/usr/bin"
-        cp "$NEMAC_DIR/nemac-updator" "$STAGING_DIR/usr/bin/nemac-updator"
+        cp "$NEMAC_DIR/tools/nemac-updator" "$STAGING_DIR/usr/bin/nemac-updator"
         chmod +x "$STAGING_DIR/usr/bin/nemac-updator"
     fi
 
     mkdir -p "$STAGING_DIR/opt/nemac-de"
-    cp "$NEMAC_DIR/scripts/nm-diagnose" "$STAGING_DIR/opt/nemac-de/nemac-diagnose.sh"
-    chmod +x "$STAGING_DIR/opt/nemac-de/nemac-diagnose.sh"
+    if [ -f "$NEMAC_DIR/tools/nm-diagnose" ]; then
+        cp "$NEMAC_DIR/tools/nm-diagnose" "$STAGING_DIR/opt/nemac-de/nemac-diagnose.sh"
+        chmod +x "$STAGING_DIR/opt/nemac-de/nemac-diagnose.sh"
+    fi
 
     # Config files
     mkdir -p "$STAGING_DIR/etc"
