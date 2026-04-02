@@ -428,7 +428,7 @@ CONF
 
     local output="$RELEASES_DIR/$TARBALL_NAME"
     cd "$STAGING_DIR"
-    tar czf "$output" .
+    tar czf "$output" --owner=root --group=root .
     local size
     size=$(du -h "$output" | cut -f1)
 
