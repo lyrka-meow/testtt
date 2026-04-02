@@ -11,7 +11,7 @@ BOLD='\033[1m'
 NC='\033[0m'
 
 NEMAC_REPO="lyrka-meow/testtt"
-NEMAC_VERSION="1.1"
+NEMAC_VERSION="1.0"
 GITHUB_API="https://api.github.com/repos/$NEMAC_REPO/releases/latest"
 NEMAC_BIN="/usr/local/bin/nemac"
 NEMAC_DEV_BIN="/usr/local/bin/nemac-dev"
@@ -20,31 +20,26 @@ LOGFILE="/tmp/nemac-install.log"
 
 # Safe paths: tar extraction only allowed into these prefixes
 SAFE_PREFIXES=(
-    "usr/bin/nemac"
-    "usr/bin/cupdatecursor"
-    "usr/bin/chotkeys"
-    "usr/bin/ccheckpass"
-    "usr/lib/qt/qml/Nemac"
-    "usr/lib/qt/qml/NemacUI"
-    "usr/lib/qt/plugins/styles/libnemacstyle"
-    "usr/lib/qt/plugins/platformthemes/libnemacplatformtheme"
-    "usr/lib/qt/plugins/kwin/effects/plugins/libroundedwindow"
-    "usr/lib/qt/plugins/org.kde.kdecoration2/libnemacdecoration"
+    "usr/bin/"
+    "usr/local/bin/"
+    "usr/lib/qt/"
     "usr/lib/cmake/NemacUI"
+    "usr/lib/libnemac"
+    "usr/lib/libNemac"
+    "usr/lib/systemd/user/"
     "usr/share/nemac"
+    "usr/share/applications/"
     "usr/share/backgrounds/nemacde"
-    "usr/share/icons/nemac"
     "usr/share/icons/Crule"
     "usr/share/themes/Nemac"
-    "usr/share/xsessions/nemac.desktop"
-    "usr/share/applications/nemac-"
-    "usr/share/kwin/scripts/nemac"
-    "usr/share/kwin/effects/nemac_"
-    "usr/share/kwin/tabbox/nemac_"
-    "usr/lib/systemd/user/nemac-"
+    "usr/share/xsessions/"
+    "usr/share/kwin/"
+    "usr/share/kwin-wayland/"
+    "usr/share/polkit-1/actions/org.nemac."
+    "usr/share/polkit-1/actions/com.nemac."
     "opt/nemac-de"
     "etc/nemac"
-    "etc/xdg/autostart/nemac-"
+    "etc/xdg/"
 )
 
 die() {
@@ -276,7 +271,7 @@ download_and_install() {
 
     # 2. Extract only to safe locations, preserve no ownership from archive
     echo -ne "         Устанавливаю...\r"
-    if ! tar xzf "$tmpfile" -C / --no-same-owner --no-same-permissions 2>>"$LOGFILE"; then
+    if ! tar xzf "$tmpfile" -C / --no-same-owner 2>>"$LOGFILE"; then
         die "Ошибка распаковки архива"
     fi
 
