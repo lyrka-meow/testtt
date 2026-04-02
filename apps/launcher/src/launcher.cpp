@@ -60,7 +60,7 @@ Launcher::Launcher(bool firstShow, QQuickView *w)
     // Let the animation in qml be hidden after the execution is complete
     m_hideTimer->setInterval(200);
     m_hideTimer->setSingleShot(true);
-    connect(m_hideTimer, &QTimer::timeout, this, [=] { setVisible(false); });
+    connect(m_hideTimer, &QTimer::timeout, this, [=] { hideWindow(); });
 
     if (m_dockInterface.isValid() && !m_dockInterface.lastError().isValid()) {
         updateMargins();
@@ -108,6 +108,7 @@ void Launcher::showWindow()
     emit showedChanged();
 
     setVisible(true);
+    requestActivate();
 }
 
 void Launcher::hideWindow()
@@ -119,7 +120,7 @@ void Launcher::hideWindow()
 
 void Launcher::toggle()
 {
-    isVisible() ? Launcher::hideWindow() : Launcher::showWindow();
+    m_showed ? Launcher::hideWindow() : Launcher::showWindow();
 }
 
 bool Launcher::dockAvailable()
@@ -205,7 +206,7 @@ void Launcher::resizeEvent(QResizeEvent *e)
 
 void Launcher::onActiveChanged()
 {
-    if (!isActive())
-        Launcher::hide();
+    if (!isActive() && m_showed)
+        m_hideTimer->start();
 }
 

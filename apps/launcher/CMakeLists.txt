@@ -56,5 +56,10 @@ qt5_add_translation(QM_FILES ${TS_FILES})
 add_custom_target(translations DEPENDS ${QM_FILES} SOURCES ${TS_FILES})
 add_dependencies(${PROJECT_NAME} translations)
 
+set_target_properties(${PROJECT_NAME} PROPERTIES OUTPUT_NAME "nemac-launcher.bin")
 install(TARGETS ${PROJECT_NAME} RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+
+file(WRITE ${CMAKE_CURRENT_BINARY_DIR}/nemac-launcher
+"#!/bin/sh\nexport QT_QUICK_BACKEND=software\nexport QSG_RENDER_LOOP=basic\nexec /usr/bin/nemac-launcher.bin \"\$@\"\n")
+install(PROGRAMS ${CMAKE_CURRENT_BINARY_DIR}/nemac-launcher DESTINATION bin)
 install(FILES ${QM_FILES} DESTINATION /usr/share/${PROJECT_NAME}/translations)
