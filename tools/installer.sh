@@ -182,7 +182,7 @@ install_dependencies() {
 
 # Check if a path from tar archive is safe to extract
 is_safe_path() {
-    local path="$1"
+    local path="${1#./}"  # strip leading ./
 
     # Block absolute paths and path traversal
     if [[ "$path" == /* ]] || [[ "$path" == *..* ]]; then
