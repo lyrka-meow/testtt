@@ -15,14 +15,18 @@ if [ -d "$SCRIPT_DIR/.git" ]; then
 else
     NEMAC_DIR="/opt/nemac-de"
 fi
-NEMAC_VERSION="3.6"
+NEMAC_VERSION="1.1"
 NEMAC_REPO="lyrka-meow/testtt"
+KWIN_VERSION="5.27.11"
+KWIN_URL="https://invent.kde.org/plasma/kwin/-/archive/Plasma/${KWIN_VERSION}/kwin-Plasma-${KWIN_VERSION}.tar.gz"
+KWIN_PREFIX="/opt/nemac-de/kwin"
 LOG_DIR="${NEMAC_DIR}/logs"
 STAGING_DIR="${NEMAC_DIR}/.nemac-staging"
 RELEASES_DIR="${NEMAC_DIR}/releases"
 TARBALL_NAME="nemac-de-${NEMAC_VERSION}-x86_64.tar.gz"
 
 BUILD_ORDER=(
+    "kwin"
     "libnemac"
     "nemacui"
     "core"
@@ -41,18 +45,22 @@ BUILD_ORDER=(
 )
 
 BUILD_DEPS=(
-    git cmake make gcc
+    git cmake make gcc ninja
     qt5-tools extra-cmake-modules
     qt5-base qt5-declarative qt5-quickcontrols2 qt5-x11extras qt5-svg qt5-graphicaleffects
-    qt5-sensors
-    kwin kwin-x11 kdecoration
-    kwindowsystem5 kidletime5 kcoreaddons5
+    qt5-sensors qt5-multimedia qt5-script qt5-virtualkeyboard
+    kdecoration
+    kwindowsystem5 kidletime5 kcoreaddons5 kconfig5 kconfigwidgets5
+    kcrash5 kglobalaccel5 ki18n5 knotifications5
+    kpackage5 kdeclarative5
     libkscreen5 kio5 solid5
     polkit polkit-qt5
     networkmanager-qt5
     libqt5xdg libdbusmenu-qt5
     libcanberra
-    libxcb xcb-util xcb-util-wm xcb-util-keysyms
+    libepoxy libxcb xcb-util xcb-util-wm xcb-util-keysyms xcb-util-image xcb-util-cursor
+    libdrm mesa libxkbcommon
+    wayland wayland-protocols libinput lcms2
     libpulse
     bluez bluez-qt5
     freetype2 fontconfig
@@ -68,6 +76,74 @@ print_header() {
     echo ""
 }
 
+# ─── KWIN BUILD ───
+
+build_kwin() {
+    local mode="$1"  # "install" or "staging"
+    local staging_dir="$2"
+
+    echo -e "  ${BLUE}[kwin]${NC} Скачиваю KWin ${KWIN_VERSION}..."
+    local kwin_src="/tmp/nemac-kwin-build"
+    rm -rf "$kwin_src"
+    mkdir -p "$kwin_src"
+
+    if ! curl -fSL "$KWIN_URL" -o "$kwin_src/kwin.tar.gz" 2>>"$LOG_DIR/nemac-kwin-download.log"; then
+        echo -e "  ${RED}✗${NC} kwin (скачивание не удалось)"
+        return 1
+    fi
+
+    tar xzf "$kwin_src/kwin.tar.gz" -C "$kwin_src"
+    local src="$kwin_src/kwin-Plasma-${KWIN_VERSION}"
+
+    echo -e "  ${BLUE}[kwin]${NC} Собираю KWin ${KWIN_VERSION}..."
+    if ! cmake -Wno-dev -DCMAKE_WARN_DEPRECATED=OFF \
+        -DCMAKE_INSTALL_PREFIX="$KWIN_PREFIX" \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DBUILD_TESTING=OFF \
+        -DKDE_INSTALL_LIBDIR=lib \
+        -G Ninja \
+        -S "$src" -B "$kwin_src/build" > "$LOG_DIR/nemac-cmake-kwin.log" 2>&1; then
+        echo -e "  ${RED}✗${NC} kwin (cmake failed)"
+        echo -e "       ${YELLOW}лог: $LOG_DIR/nemac-cmake-kwin.log${NC}"
+        return 1
+    fi
+
+    if ! cmake --build "$kwin_src/build" --parallel "$(nproc)" > "$LOG_DIR/nemac-build-kwin.log" 2>&1; then
+        echo -e "  ${RED}✗${NC} kwin (сборка не удалась)"
+        echo -e "       ${YELLOW}лог: $LOG_DIR/nemac-build-kwin.log${NC}"
+        return 1
+    fi
+
+    if [ "$mode" = "install" ]; then
+        sudo cmake --install "$kwin_src/build" > /dev/null 2>&1
+        # Wrapper script
+        sudo tee /usr/bin/nemac-kwin > /dev/null << 'WRAPPER'
+#!/bin/bash
+export QT_PLUGIN_PATH="/opt/nemac-de/kwin/lib/qt5/plugins:${QT_PLUGIN_PATH}"
+export QML2_IMPORT_PATH="/opt/nemac-de/kwin/lib/qt5/qml:${QML2_IMPORT_PATH}"
+export LD_LIBRARY_PATH="/opt/nemac-de/kwin/lib:${LD_LIBRARY_PATH}"
+export XDG_DATA_DIRS="/opt/nemac-de/kwin/share:${XDG_DATA_DIRS}"
+exec /opt/nemac-de/kwin/bin/kwin_x11 "$@"
+WRAPPER
+        sudo chmod 755 /usr/bin/nemac-kwin
+    elif [ "$mode" = "staging" ]; then
+        env DESTDIR="$staging_dir" cmake --install "$kwin_src/build" > "$LOG_DIR/nemac-destdir-install-kwin.log" 2>&1
+        mkdir -p "$staging_dir/usr/bin"
+        cat > "$staging_dir/usr/bin/nemac-kwin" << 'WRAPPER'
+#!/bin/bash
+export QT_PLUGIN_PATH="/opt/nemac-de/kwin/lib/qt5/plugins:${QT_PLUGIN_PATH}"
+export QML2_IMPORT_PATH="/opt/nemac-de/kwin/lib/qt5/qml:${QML2_IMPORT_PATH}"
+export LD_LIBRARY_PATH="/opt/nemac-de/kwin/lib:${LD_LIBRARY_PATH}"
+export XDG_DATA_DIRS="/opt/nemac-de/kwin/share:${XDG_DATA_DIRS}"
+exec /opt/nemac-de/kwin/bin/kwin_x11 "$@"
+WRAPPER
+        chmod 755 "$staging_dir/usr/bin/nemac-kwin"
+    fi
+
+    rm -rf "$kwin_src"
+    return 0
+}
+
 # ─── BUILD ───
 
 cmd_build() {
@@ -75,7 +151,17 @@ cmd_build() {
     echo -e "${BLUE}[build]${NC} Устанавливаю зависимости для сборки..."
 
     mkdir -p "$LOG_DIR" "$RELEASES_DIR"
-    sudo pacman -S --needed --noconfirm "${BUILD_DEPS[@]}" > "$LOG_DIR/nemac-deps.log" 2>&1
+
+    # Filter out unavailable packages
+    local safe_deps=()
+    for pkg in "${BUILD_DEPS[@]}"; do
+        if pacman -Si "$pkg" &>/dev/null; then
+            safe_deps+=("$pkg")
+        else
+            echo -e "  ${YELLOW}!${NC} Пакет '$pkg' не найден, пропускаю"
+        fi
+    done
+    sudo pacman -S --needed --noconfirm "${safe_deps[@]}" > "$LOG_DIR/nemac-deps.log" 2>&1
     echo -e "${GREEN}  ✓${NC} Зависимости установлены"
 
     if [ ! -d "$NEMAC_DIR/.git" ]; then
@@ -92,6 +178,18 @@ cmd_build() {
 
     for component in "${BUILD_ORDER[@]}"; do
         current=$((current + 1))
+
+        # KWin: download from kde.org and build separately
+        if [ "$component" = "kwin" ]; then
+            echo -ne "  [$current/$total] kwin (KWin ${KWIN_VERSION})...\r"
+            if build_kwin "install" ""; then
+                echo -e "  ${GREEN}✓${NC} [$current/$total] kwin (KWin ${KWIN_VERSION} → ${KWIN_PREFIX})"
+            else
+                failed+=("kwin")
+            fi
+            continue
+        fi
+
         local src_dir="$NEMAC_DIR/$component"
 
         if [ ! -d "$src_dir" ]; then
@@ -146,6 +244,18 @@ cmd_package() {
 
     for component in "${BUILD_ORDER[@]}"; do
         current=$((current + 1))
+
+        # KWin: download from kde.org and build separately
+        if [ "$component" = "kwin" ]; then
+            echo -ne "  [$current/$total] kwin (KWin ${KWIN_VERSION})...\r"
+            if build_kwin "staging" "$STAGING_DIR"; then
+                echo -e "  ${GREEN}✓${NC} [$current/$total] kwin (KWin ${KWIN_VERSION})"
+            else
+                failed+=("kwin")
+            fi
+            continue
+        fi
+
         local src_dir="$NEMAC_DIR/$component"
 
         if [ ! -d "$src_dir" ]; then
