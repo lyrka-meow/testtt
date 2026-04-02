@@ -24,4 +24,6 @@ else()
     message(STATUS "KDecoration2 not found, skipping decoration plugin")
 endif()
 
-add_subdirectory(roundedwindow)
+if (FALSE)
+    add_subdirectory(roundedwindow)
+endif()

@@ -26,7 +26,7 @@ pkg_search_module(FontConfig REQUIRED fontconfig IMPORTED_TARGET)
 pkg_search_module(ICU REQUIRED icu-i18n)
 
 include_directories(${ICU_INCLUDE_DIRS})
-include_directories(${CMAKE_CURRENT_SOURCE_DIR}/../core/session)
+include_directories(${CMAKE_CURRENT_SOURCE_DIR}/../../core/core/session)
 
 set(SRCS
     src/cscreenmanager.cpp
@@ -62,7 +62,7 @@ set(SRCS
     src/networkproxy.cpp
     src/defaultapplications.cpp
     src/desktopproperties.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/../core/session/kwinscripts.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../core/core/session/kwinscripts.cpp
 )
 
 set(RESOURCES

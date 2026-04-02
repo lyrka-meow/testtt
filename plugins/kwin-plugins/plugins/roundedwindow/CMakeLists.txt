@@ -37,6 +37,11 @@ add_library(roundedwindow MODULE
     resources.qrc
 )
 
+set_target_properties(roundedwindow PROPERTIES
+    CXX_STANDARD 20
+    CXX_STANDARD_REQUIRED ON
+)
+
 target_link_libraries(roundedwindow
     PUBLIC
         Qt5::Core
@@ -45,6 +50,9 @@ target_link_libraries(roundedwindow
         KF5::CoreAddons
         KF5::ConfigCore
         KF5::WindowSystem
+        ${KWIN_EFFECTS}
+        ${KWIN_GLUTILS}
+        ${OPENGL}
 )
 
 install (TARGETS roundedwindow DESTINATION ${QT_PLUGINS_DIR}/kwin/effects/plugins)

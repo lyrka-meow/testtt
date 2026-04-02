@@ -33,7 +33,7 @@ class RoundedWindow : public KWin::Effect
 
 public:
     enum DataRole {
-        BaseRole = KWin::DataRole::LanczosCacheRole + 100,
+        BaseRole = 1000,
         WindowRadiusRole = BaseRole + 1,
         WindowClipPathRole = BaseRole + 2,
         WindowMaskTextureRole = BaseRole + 3,

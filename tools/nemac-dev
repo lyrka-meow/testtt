@@ -1,5 +1,4 @@
 #!/bin/bash
-set -e
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -12,10 +11,12 @@ NC='\033[0m'
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 if [ -d "$SCRIPT_DIR/.git" ]; then
     NEMAC_DIR="$SCRIPT_DIR"
+elif [ -d "$SCRIPT_DIR/../.git" ]; then
+    NEMAC_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 else
     NEMAC_DIR="/opt/nemac-de"
 fi
-NEMAC_VERSION="1.1"
+NEMAC_VERSION="1.0"
 NEMAC_REPO="lyrka-meow/testtt"
 KWIN_VERSION="5.27.11"
 KWIN_PREFIX="/opt/nemac-de/kwin"
@@ -26,21 +27,21 @@ TARBALL_NAME="nemac-de-${NEMAC_VERSION}-x86_64.tar.gz"
 
 BUILD_ORDER=(
     "kwin"
-    "libnemac"
-    "nemacui"
-    "core"
-    "kwin-plugins"
-    "qt-plugins"
-    "dock"
-    "statusbar"
-    "launcher"
-    "settings"
-    "filemanager"
-    "screenlocker"
-    "screenshot"
-    "terminal"
-    "texteditor"
-    "calculator"
+    "core/libnemac"
+    "apps/nemacui"
+    "core/core"
+    "plugins/kwin-plugins"
+    "plugins/qt-plugins"
+    "ui/dock"
+    "ui/statusbar"
+    "apps/launcher"
+    "apps/settings"
+    "apps/filemanager"
+    "ui/screenlocker"
+    "apps/screenshot"
+    "apps/terminal"
+    "apps/texteditor"
+    "apps/calculator"
 )
 
 BUILD_DEPS=(
@@ -51,7 +52,8 @@ BUILD_DEPS=(
     kdecoration
     kwindowsystem5 kidletime5 kcoreaddons5 kconfig5 kconfigwidgets5
     kcrash5 kglobalaccel5 ki18n5 knotifications5
-    kpackage5 kdeclarative5
+    kpackage5 kdeclarative5 kwayland5 kservice5 kxmlgui5 kcmutils5
+    knewstuff5 kdbusaddons5 kauth5 kwidgetsaddons5 kactivities5
     libkscreen5 kio5 solid5
     polkit polkit-qt5
     networkmanager-qt5
@@ -59,7 +61,7 @@ BUILD_DEPS=(
     libcanberra
     libepoxy libxcb xcb-util xcb-util-wm xcb-util-keysyms xcb-util-image xcb-util-cursor
     libdrm mesa libxkbcommon
-    wayland wayland-protocols libinput lcms2
+    wayland wayland-protocols plasma-wayland-protocols libinput lcms2
     libpulse
     bluez bluez-qt5
     freetype2 fontconfig
@@ -76,12 +78,40 @@ print_header() {
 }
 
 # ─── KWIN BUILD ───
-# KWin 5.27 needs kdecoration5 (only v6 in repos)
-# Archives are vendored in core/kwin/archives/ — no network needed
-# kwayland-server merged into kwin 5.25+, plasma-framework not used by kwin 5.27
-# kscreenlocker disabled via cmake flag (not needed for X11 WM)
+# KWin 5.27 needs: kdecoration5 (only v6 in repos), plasma-framework5 (removed from repos)
+# Archives vendored in core/kwin/archives/ — no network needed
+# kwayland-server merged into kwin 5.25+
+# kscreenlocker disabled via cmake flag
 
 KWIN_ARCHIVES_DIR="${NEMAC_DIR}/core/kwin/archives"
+PLASMA_FW_VERSION="5.116.0"
+
+build_kwin_sub() {
+    local name="$1" src_dir="$2" prefix="$3"
+    echo -e "  ${BLUE}[kwin]${NC}   ↳ $name..."
+    if ! cmake -Wno-dev -DCMAKE_WARN_DEPRECATED=OFF \
+        -DCMAKE_INSTALL_PREFIX="$prefix" \
+        -DCMAKE_PREFIX_PATH="$prefix" \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DBUILD_TESTING=OFF \
+        -DKDE_INSTALL_LIBDIR=lib \
+        -G Ninja \
+        -S "$src_dir" -B "/tmp/nemac-kwin-build/build-${name}" \
+        > "$LOG_DIR/nemac-cmake-${name}.log" 2>&1; then
+        echo -e "  ${RED}✗${NC}   $name (cmake)"
+        echo -e "       ${YELLOW}лог: $LOG_DIR/nemac-cmake-${name}.log${NC}"
+        return 1
+    fi
+    if ! cmake --build "/tmp/nemac-kwin-build/build-${name}" --parallel "$(nproc)" \
+        > "$LOG_DIR/nemac-build-${name}.log" 2>&1; then
+        echo -e "  ${RED}✗${NC}   $name (сборка)"
+        echo -e "       ${YELLOW}лог: $LOG_DIR/nemac-build-${name}.log${NC}"
+        return 1
+    fi
+    sudo cmake --install "/tmp/nemac-kwin-build/build-${name}" > /dev/null 2>&1
+    echo -e "  ${GREEN}✓${NC}   $name"
+    return 0
+}
 
 build_kwin() {
     local mode="$1"  # "install" or "staging"
@@ -92,41 +122,24 @@ build_kwin() {
     mkdir -p "$kwin_src"
 
     # Verify archives exist
-    if [ ! -f "$KWIN_ARCHIVES_DIR/kdecoration-${KWIN_VERSION}.tar.gz" ] || \
-       [ ! -f "$KWIN_ARCHIVES_DIR/kwin-${KWIN_VERSION}.tar.gz" ]; then
-        echo -e "  ${RED}✗${NC} kwin (архивы не найдены в $KWIN_ARCHIVES_DIR)"
-        echo -e "       ${YELLOW}Нужны: kdecoration-${KWIN_VERSION}.tar.gz, kwin-${KWIN_VERSION}.tar.gz${NC}"
-        return 1
-    fi
+    for f in "kdecoration-${KWIN_VERSION}.tar.gz" "kwin-${KWIN_VERSION}.tar.gz" "plasma-framework-${PLASMA_FW_VERSION}.tar.xz"; do
+        if [ ! -f "$KWIN_ARCHIVES_DIR/$f" ]; then
+            echo -e "  ${RED}✗${NC} kwin (архив не найден: $f)"
+            return 1
+        fi
+    done
 
     export CMAKE_PREFIX_PATH="$KWIN_PREFIX:${CMAKE_PREFIX_PATH:-}"
 
-    # 1. Build kdecoration
-    echo -e "  ${BLUE}[kwin]${NC}   ↳ kdecoration..."
+    # 1. kdecoration
     tar xzf "$KWIN_ARCHIVES_DIR/kdecoration-${KWIN_VERSION}.tar.gz" -C "$kwin_src"
-    if ! cmake -Wno-dev -DCMAKE_WARN_DEPRECATED=OFF \
-        -DCMAKE_INSTALL_PREFIX="$KWIN_PREFIX" \
-        -DCMAKE_BUILD_TYPE=Release \
-        -DBUILD_TESTING=OFF \
-        -DKDE_INSTALL_LIBDIR=lib \
-        -G Ninja \
-        -S "$kwin_src/kdecoration-v${KWIN_VERSION}" \
-        -B "$kwin_src/build-kdecoration" \
-        > "$LOG_DIR/nemac-cmake-kdecoration.log" 2>&1; then
-        echo -e "  ${RED}✗${NC}   kdecoration (cmake)"
-        echo -e "       ${YELLOW}лог: $LOG_DIR/nemac-cmake-kdecoration.log${NC}"
-        rm -rf "$kwin_src"; return 1
-    fi
-    if ! cmake --build "$kwin_src/build-kdecoration" --parallel "$(nproc)" \
-        > "$LOG_DIR/nemac-build-kdecoration.log" 2>&1; then
-        echo -e "  ${RED}✗${NC}   kdecoration (сборка)"
-        echo -e "       ${YELLOW}лог: $LOG_DIR/nemac-build-kdecoration.log${NC}"
-        rm -rf "$kwin_src"; return 1
-    fi
-    sudo cmake --install "$kwin_src/build-kdecoration" > /dev/null 2>&1
-    echo -e "  ${GREEN}✓${NC}   kdecoration"
+    build_kwin_sub "kdecoration" "$kwin_src/kdecoration-v${KWIN_VERSION}" "$KWIN_PREFIX" || { rm -rf "$kwin_src"; return 1; }
 
-    # 2. Build KWin
+    # 2. plasma-framework
+    tar xf "$KWIN_ARCHIVES_DIR/plasma-framework-${PLASMA_FW_VERSION}.tar.xz" -C "$kwin_src"
+    build_kwin_sub "plasma-framework" "$kwin_src/plasma-framework-${PLASMA_FW_VERSION}" "$KWIN_PREFIX" || { rm -rf "$kwin_src"; return 1; }
+
+    # 3. KWin
     echo -e "  ${BLUE}[kwin]${NC} Собираю KWin ${KWIN_VERSION}..."
     tar xzf "$KWIN_ARCHIVES_DIR/kwin-${KWIN_VERSION}.tar.gz" -C "$kwin_src"
     if ! cmake -Wno-dev -DCMAKE_WARN_DEPRECATED=OFF \
@@ -151,7 +164,7 @@ build_kwin() {
         rm -rf "$kwin_src"; return 1
     fi
 
-    # 3. Install
+    # 4. Install
     if [ "$mode" = "install" ]; then
         sudo cmake --install "$kwin_src/build-kwin" > /dev/null 2>&1
         sudo tee /usr/bin/nemac-kwin > /dev/null << 'WRAPPER'
@@ -166,6 +179,7 @@ WRAPPER
     elif [ "$mode" = "staging" ]; then
         env DESTDIR="$staging_dir" cmake --install "$kwin_src/build-kwin" > "$LOG_DIR/nemac-destdir-install-kwin.log" 2>&1
         env DESTDIR="$staging_dir" cmake --install "$kwin_src/build-kdecoration" > /dev/null 2>&1
+        env DESTDIR="$staging_dir" cmake --install "$kwin_src/build-plasma-framework" > /dev/null 2>&1
         mkdir -p "$staging_dir/usr/bin"
         cat > "$staging_dir/usr/bin/nemac-kwin" << 'WRAPPER'
 #!/bin/bash
@@ -238,8 +252,9 @@ cmd_build() {
         local build_dir="$src_dir/build"
         rm -rf "$build_dir"
 
-        if cmake -Wno-dev -DCMAKE_WARN_DEPRECATED=OFF -DCMAKE_INSTALL_PREFIX:PATH=/usr -S "$src_dir" -B "$build_dir" > "$LOG_DIR/nemac-cmake-$component.log" 2>&1; then
-            if cmake --build "$build_dir" --parallel "$(nproc)" > "$LOG_DIR/nemac-build-$component.log" 2>&1; then
+        local log_name="${component//\//-}"
+        if cmake -Wno-dev -DCMAKE_WARN_DEPRECATED=OFF -DCMAKE_INSTALL_PREFIX:PATH=/usr -S "$src_dir" -B "$build_dir" > "$LOG_DIR/nemac-cmake-${log_name}.log" 2>&1; then
+            if cmake --build "$build_dir" --parallel "$(nproc)" > "$LOG_DIR/nemac-build-${log_name}.log" 2>&1; then
                 sudo cmake --install "$build_dir" --prefix /usr > /dev/null 2>&1
                 echo -e "  ${GREEN}✓${NC} [$current/$total] $component"
             else
@@ -304,24 +319,26 @@ cmd_package() {
 
         if [ ! -f "$build_dir/CMakeCache.txt" ]; then
             echo -e "  ${YELLOW}!${NC} $component — нет build, конфигурирую..."
-            if ! cmake -Wno-dev -DCMAKE_WARN_DEPRECATED=OFF -DCMAKE_INSTALL_PREFIX:PATH=/usr -S "$src_dir" -B "$build_dir" > "$LOG_DIR/nemac-cmake-$component.log" 2>&1; then
+            local log_name="${component//\//-}"
+            if ! cmake -Wno-dev -DCMAKE_WARN_DEPRECATED=OFF -DCMAKE_INSTALL_PREFIX:PATH=/usr -S "$src_dir" -B "$build_dir" > "$LOG_DIR/nemac-cmake-${log_name}.log" 2>&1; then
                 failed+=("$component")
                 echo -e "  ${RED}✗${NC} $component (cmake failed)"
                 continue
             fi
         fi
 
-        if ! cmake --build "$build_dir" --parallel "$(nproc)" > "$LOG_DIR/nemac-build-$component.log" 2>&1; then
+        local log_name="${component//\//-}"
+        if ! cmake --build "$build_dir" --parallel "$(nproc)" > "$LOG_DIR/nemac-build-${log_name}.log" 2>&1; then
             failed+=("$component")
             echo -e "  ${RED}✗${NC} $component (cmake --build failed)"
-            echo -e "       ${YELLOW}лог: $LOG_DIR/nemac-build-$component.log${NC}"
+            echo -e "       ${YELLOW}лог: $LOG_DIR/nemac-build-${log_name}.log${NC}"
             continue
         fi
 
-        if ! env DESTDIR="$STAGING_DIR" cmake --install "$build_dir" --prefix /usr > "$LOG_DIR/nemac-destdir-install-$component.log" 2>&1; then
+        if ! env DESTDIR="$STAGING_DIR" cmake --install "$build_dir" --prefix /usr > "$LOG_DIR/nemac-destdir-install-${log_name}.log" 2>&1; then
             failed+=("$component")
             echo -e "  ${RED}✗${NC} $component (cmake --install DESTDIR=... failed)"
-            echo -e "       ${YELLOW}лог: $LOG_DIR/nemac-destdir-install-$component.log${NC}"
+            echo -e "       ${YELLOW}лог: $LOG_DIR/nemac-destdir-install-${log_name}.log${NC}"
             continue
         fi
         echo -e "  ${GREEN}✓${NC} [$current/$total] $component"

@@ -329,8 +329,6 @@ void RoundedWindow::drawWindow(KWin::EffectWindow *w, int mask, const QRegion &r
     glTexParameterfv(GL_TEXTURE_2D, GL_TEXTURE_BORDER_COLOR, borderColor);
     glActiveTexture(GL_TEXTURE0);
 
-    KWin::GLShader *oldShader = data.shader;
-    data.shader = m_shader;
     KWin::ShaderManager::instance()->pushShader(m_shader);
 
     m_shader->setUniform("topleft", 10);
@@ -352,7 +350,6 @@ void RoundedWindow::drawWindow(KWin::EffectWindow *w, int mask, const QRegion &r
     KWin::Effect::drawWindow(w, mask, region, data);
     KWin::ShaderManager::instance()->popShader();
 
-    data.shader = oldShader;
 
     glActiveTexture(GL_TEXTURE10);
     textureTopLeft->unbind();
