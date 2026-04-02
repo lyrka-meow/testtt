@@ -31,6 +31,7 @@ SAFE_PREFIXES=(
     "usr/share/applications/"
     "usr/share/backgrounds/nemacde"
     "usr/share/icons/Crule"
+    "usr/share/icons/nemac-"
     "usr/share/themes/Nemac"
     "usr/share/xsessions/"
     "usr/share/kwin/"

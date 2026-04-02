@@ -364,33 +364,54 @@ WRAPPER
 
     echo -e "${BLUE}[package]${NC} Добавляю ассеты..."
 
-    # Wallpapers
-    if [ -d "$NEMAC_DIR/wallpapers/sources" ]; then
+    # Wallpapers (in themes/wallpapers/sources/)
+    if [ -d "$NEMAC_DIR/themes/wallpapers/sources" ]; then
         mkdir -p "$STAGING_DIR/usr/share/backgrounds/nemacde"
-        cp -f "$NEMAC_DIR/wallpapers/sources"/*.jpg "$STAGING_DIR/usr/share/backgrounds/nemacde/" 2>/dev/null || true
+        cp -f "$NEMAC_DIR/themes/wallpapers/sources"/*.jpg "$STAGING_DIR/usr/share/backgrounds/nemacde/" 2>/dev/null || true
     fi
 
-    # Icons
-    if [ -d "$NEMAC_DIR/icons/Crule" ]; then
+    # Icons (in themes/icons/) — skip @2x and dark variant to keep size down
+    if [ -d "$NEMAC_DIR/themes/icons/Crule" ]; then
+        mkdir -p "$STAGING_DIR/usr/share/icons/Crule"
+        rsync -a --exclude='*@2x*' "$NEMAC_DIR/themes/icons/Crule/" "$STAGING_DIR/usr/share/icons/Crule/" 2>/dev/null || \
+            find "$NEMAC_DIR/themes/icons/Crule" -not -path '*@2x*' | while read f; do
+                rel="${f#$NEMAC_DIR/themes/icons/Crule/}"
+                dst="$STAGING_DIR/usr/share/icons/Crule/$rel"
+                [ -d "$f" ] && mkdir -p "$dst" || cp "$f" "$dst" 2>/dev/null
+            done
+    fi
+
+    # Cursor themes (in themes/cursor-themes/)
+    if [ -d "$NEMAC_DIR/themes/cursor-themes/nemac-light" ]; then
         mkdir -p "$STAGING_DIR/usr/share/icons"
-        cp -rf "$NEMAC_DIR/icons/Crule" "$STAGING_DIR/usr/share/icons/"
-        cp -rf "$NEMAC_DIR/icons/Crule-dark" "$STAGING_DIR/usr/share/icons/" 2>/dev/null || true
+        cp -rf "$NEMAC_DIR/themes/cursor-themes/nemac-light" "$STAGING_DIR/usr/share/icons/"
+        cp -rf "$NEMAC_DIR/themes/cursor-themes/nemac-dark" "$STAGING_DIR/usr/share/icons/" 2>/dev/null || true
     fi
 
-    # Cursor themes
-    if [ -d "$NEMAC_DIR/cursor-themes/nemac-light" ]; then
-        mkdir -p "$STAGING_DIR/usr/share/icons"
-        cp -rf "$NEMAC_DIR/cursor-themes/nemac-light" "$STAGING_DIR/usr/share/icons/"
-        cp -rf "$NEMAC_DIR/cursor-themes/nemac-dark" "$STAGING_DIR/usr/share/icons/" 2>/dev/null || true
-    fi
-
-    # GTK themes
-    if [ -d "$NEMAC_DIR/gtk-themes/Nemac" ]; then
+    # GTK themes (in themes/gtk-themes/)
+    if [ -d "$NEMAC_DIR/themes/gtk-themes/Nemac" ]; then
         mkdir -p "$STAGING_DIR/usr/share/themes"
-        cp -rf "$NEMAC_DIR/gtk-themes/Nemac" "$STAGING_DIR/usr/share/themes/"
-        cp -rf "$NEMAC_DIR/gtk-themes/Nemac-light" "$STAGING_DIR/usr/share/themes/" 2>/dev/null || true
-        cp -rf "$NEMAC_DIR/gtk-themes/Nemac-dark" "$STAGING_DIR/usr/share/themes/" 2>/dev/null || true
+        cp -rf "$NEMAC_DIR/themes/gtk-themes/Nemac" "$STAGING_DIR/usr/share/themes/"
+        cp -rf "$NEMAC_DIR/themes/gtk-themes/Nemac-light" "$STAGING_DIR/usr/share/themes/" 2>/dev/null || true
+        cp -rf "$NEMAC_DIR/themes/gtk-themes/Nemac-dark" "$STAGING_DIR/usr/share/themes/" 2>/dev/null || true
     fi
+
+    # Autostart entries for DE components
+    mkdir -p "$STAGING_DIR/etc/xdg/autostart"
+    for svc in nemac-statusbar nemac-dock nemac-launcher nemac-notificationd nemac-settings-daemon; do
+        bin="/usr/bin/$svc"
+        name=$(echo "$svc" | sed 's/nemac-//' | sed 's/-/ /g' | awk '{for(i=1;i<=NF;i++) $i=toupper(substr($i,1,1)) substr($i,2)} 1')
+        cat > "$STAGING_DIR/etc/xdg/autostart/${svc}.desktop" << DESK
+[Desktop Entry]
+Type=Application
+Name=$name
+Exec=$bin
+TryExec=$bin
+OnlyShowIn=Nemac;
+NoDisplay=true
+X-GNOME-AutoRestart=true
+DESK
+    done
 
     # Management scripts (in tools/)
     mkdir -p "$STAGING_DIR/usr/local/bin"
