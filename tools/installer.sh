@@ -1,5 +1,5 @@
 #!/bin/bash
-# Nemac DE Installer — safe version
+# Nemac DE Installer v1.0
 # No set -e: we handle errors manually to avoid leaving system in broken state
 
 RED='\033[0;31m'
